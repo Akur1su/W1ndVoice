@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="W1ndVoice — 你的技术与安全情报雷达">
+  <title>{{ {'home': 'W1ndVoice', 'sources': '添加信息源 · W1ndVoice', 'ai': 'AI 设置 · W1ndVoice', 'server': '端口设置 · W1ndVoice', 'stream': '最新情报流 · W1ndVoice'}[active_view] }}</title>
+  <link rel="icon" href="{{ url_for('static', path='/w1ndvoice.ico') }}" type="image/x-icon">
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v={{ asset_version }}">
+  <script src="{{ url_for('static', path='/app.js') }}?v={{ asset_version }}" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="W1ndVoice 首页">
+        <img class="brand-icon" src="{{ url_for('static', path='/w1ndvoice-icon.png') }}" alt="" aria-hidden="true">
+        <span><strong>W1nd</strong>Voice</span>
+      </a>
+      <p class="tagline">技术 · 漏洞 · AI 情报雷达</p>
+      <nav class="header-actions" aria-label="主导航">
+        <span class="health"><span></span> LOCAL</span>
+        <details class="settings-menu" id="settings-menu">
+          <summary>设置 <span aria-hidden="true">⌄</span></summary>
+          <div class="settings-dropdown">
+            <a href="/sources" {% if active_view == 'sources' %}aria-current="page"{% endif %}>添加信息源</a>
+            <a href="/settings/ai" {% if active_view == 'ai' %}aria-current="page"{% endif %}>AI 设置</a>
+            <a href="/settings/server" {% if active_view == 'server' %}aria-current="page"{% endif %}>端口设置</a>
+          </div>
+        </details>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero page-view" data-view="home" aria-label="首页" {% if active_view != 'home' %}hidden{% endif %}>
+        <div class="hero-intro">
+          <h1><span>W1nd</span><span class="voice-word">Voice</span></h1>
+          <p class="hero-copy">聚合你信任的网站与订阅源，自动去重、提取正文，并按需交给 AI 进行中文分析。</p>
+        </div>
+        <div class="stats" aria-label="统计数据">
+          <div><strong>{{ stats.sources }}</strong><span>信息源</span></div>
+          <div><strong>{{ stats.articles }}</strong><span>已收录</span></div>
+          <div><strong>{{ stats.analyzed }}</strong><span>AI 分析</span></div>
+        </div>
+        <a class="home-stream-card" href="/stream">
+          <span><small>EXPLORE THE SIGNALS</small><strong>最新情报流</strong><em>查看已收录的 {{ stats.articles }} 条情报</em></span>
+          <span class="home-stream-arrow" aria-hidden="true">↗</span>
+        </a>
+      </section>
+
+      <section class="page-view workspace-view" data-view="sources" {% if active_view != 'sources' %}hidden{% endif %}>
+        <div class="page-heading">
+          <a class="back-home" href="/">← 返回首页</a>
+          <p class="eyebrow">SOURCES</p>
+          <h2>添加信息源</h2>
+        </div>
+        <details class="panel source-panel" open>
+          <summary><span>添加信息源</span><small>添加 RSS 或任意网页</small></summary>
+          <form id="source-form" class="form-grid">
+            <label>名称<input name="name" required maxlength="100" placeholder="例如：CISA 安全公告"></label>
+            <label>分类<input name="category" required maxlength="50" value="漏洞"></label>
+            <label class="wide">网址<input name="url" required type="url" placeholder="https://example.com/feed.xml"></label>
+            <label>类型
+              <select name="kind">
+                <option value="auto">自动识别</option>
+                <option value="rss">RSS / Atom</option>
+                <option value="web">普通网页</option>
+              </select>
+            </label>
+            <label id="fetch-interval-field">抓取间隔（小时）<input name="fetch_interval_hours" type="number" min="1" max="168" value="1"></label>
+            <label>主页最大抓取页数<input name="max_pages" type="number" min="1" max="100" value="5"></label>
+            <label class="wide">文章项 CSS 选择器（可选）<input name="item_selector" maxlength="300" placeholder="例如：article.news-card"></label>
+            <label class="check wide"><input name="never_auto_fetch" type="checkbox"> 永不自动抓取（仍可使用“立即抓取”）</label>
+            <label class="check wide"><input name="auto_analyze" type="checkbox"> 新文章自动 AI 分析（每轮最多 5 条）</label>
+            <label class="wide">此信息源的 AI 分析提示词（可选）<textarea name="ai_prompt" rows="6" maxlength="20000" placeholder="留空使用默认规则；可按漏洞、AI 新闻等分别设置"></textarea></label>
+            <div class="form-actions wide">
+              <button class="button secondary" id="save-source" type="submit">仅添加</button>
+              <button class="button primary" id="save-fetch-source" type="submit" data-action="fetch">添加并立即抓取</button>
+              <button class="button ghost hidden" id="cancel-edit" type="button">取消编辑</button>
+            </div>
+          </form>
+          <div class="source-list">
+            {% for source in sources %}
+            <article class="source-row">
+              <div class="source-dot {{ 'ok' if not source.last_error else 'error' }}"></div>
+              <div>
+                <strong>{{ source.name }}</strong>
+                <small>{{ source.category }} · {{ source.kind|upper }} · {{ ('每 ' ~ source.fetch_interval_hours ~ ' 小时') if source.auto_fetch_enabled else '仅手动抓取' }} · 最多 {{ source.max_pages }} 页{% if source.ai_prompt %} · 自定义 AI 规则{% endif %}</small>
+                <a class="source-url" href="{{ source.url }}" target="_blank" rel="noopener noreferrer" title="{{ source.url }}">{{ source.url }}</a>
+                <span title="{{ source.last_error }}">{{ source.last_error or source.last_status }}</span>
+              </div>
+              <button class="button tiny fetch-one" data-id="{{ source.id }}" title="立即抓取该网址">立即抓取</button>
+              <button class="button tiny edit-source"
+                data-id="{{ source.id }}"
+                data-name="{{ source.name }}"
+                data-url="{{ source.url }}"
+                data-category="{{ source.category }}"
+                data-kind="{{ source.kind }}"
+                data-selector="{{ source.item_selector }}"
+                data-hours="{{ source.fetch_interval_hours }}"
+                data-pages="{{ source.max_pages }}"
+                data-auto-fetch="{{ source.auto_fetch_enabled }}"
+                data-auto="{{ source.auto_analyze }}"
+                data-prompt="{{ source.ai_prompt }}"
+                title="修改该信息源">编辑</button>
+              <button class="icon-button danger delete-source" data-id="{{ source.id }}" title="删除">×</button>
+            </article>
+            {% else %}
+            <p class="empty-small">尚未添加信息源。</p>
+            {% endfor %}
+          </div>
+        </details>
+      </section>
+
+      <section class="page-view workspace-view ai-view" data-view="ai" {% if active_view != 'ai' %}hidden{% endif %}>
+        <div class="page-heading">
+          <a class="back-home" href="/">← 返回首页</a>
+          <p class="eyebrow">SETTINGS</p>
+          <h2>AI 设置</h2>
+        </div>
+        <details class="panel ai-panel" open>
+          <summary><span>AI 设置</span><small>{{ '已配置密钥' if ai_settings.has_api_key else '尚未配置' }}</small></summary>
+          <form id="ai-form" class="form-grid">
+            <label class="wide">OpenAI-compatible Base URL<input name="base_url" type="url" required minlength="8" maxlength="2000" value="{{ ai_settings.base_url }}"></label>
+            <label class="wide">模型<input name="model" required maxlength="500" value="{{ ai_settings.model }}"></label>
+            <label class="wide">API Key<input name="api_key" type="password" maxlength="10000" autocomplete="new-password" placeholder="{{ '留空则保留已有密钥' if ai_settings.has_api_key else 'sk-...' }}"></label>
+            <p class="privacy wide">密钥使用本机生成的 Fernet 密钥加密后存入数据库，不会返回给浏览器。</p>
+            <button class="button secondary wide" type="submit">保存 AI 设置</button>
+          </form>
+        </details>
+      </section>
+
+      <section class="page-view workspace-view server-view" data-view="server" {% if active_view != 'server' %}hidden{% endif %}>
+        <div class="page-heading">
+          <a class="back-home" href="/">← 返回首页</a>
+          <p class="eyebrow">SETTINGS</p>
+          <h2>端口设置</h2>
+        </div>
+        <div class="panel server-panel">
+          <form id="server-form" class="form-grid">
+            <label class="wide">本地监听端口<input name="port" type="number" min="1024" max="65535" step="1" required value="{{ server_settings.configured_port }}"></label>
+            <p class="privacy wide" id="server-port-state">当前使用 {{ server_settings.current_port }} 端口。{% if server_settings.environment_override %}环境变量 W1NDVOICE_PORT 正在覆盖此设置。{% elif server_settings.restart_required %}已保存新端口，关闭并重新打开应用后生效。{% else %}修改后需关闭并重新打开应用。{% endif %}</p>
+            <button class="button secondary wide" type="submit">保存端口</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="stream-section page-view" data-view="stream" {% if active_view != 'stream' %}hidden{% endif %}>
+        <a class="back-home" href="/">← 返回首页</a>
+        <div class="stream-head">
+          <div>
+            <p class="eyebrow">LATEST SIGNALS</p>
+            <h2>最新情报流</h2>
+          </div>
+          <div class="stream-tools">
+            <label class="search"><span>⌕</span><input id="article-search" placeholder="搜索标题、来源或分类"></label>
+            <button class="button primary" id="fetch-all" type="button">刷新全部源</button>
+          </div>
+        </div>
+
+        <div class="intel-groups" id="article-grid">
+          {% for group in article_groups %}
+          <details class="intel-group" data-category="{{ group.name }}">
+            <summary class="intel-group-summary">
+              <span class="group-index">{{ '%02d'|format(loop.index) }}</span>
+              <span class="group-name">{{ group.name }}</span>
+              <span class="group-latest">最新 <time data-time="{{ group.articles[0].published_at or group.articles[0].fetched_at }}">{{ group.articles[0].published_at or group.articles[0].fetched_at }}</time></span>
+              <span class="group-count">{{ group.articles|length }} 条</span>
+              <span class="disclosure" aria-hidden="true"></span>
+            </summary>
+            <div class="intel-list">
+              {% for article in group.articles %}
+              <details class="intel-article" data-search="{{ article.title }} {{ article.source_name }} {{ article.category }} {{ article.summary }} {{ article.content[:500] }}">
+                <summary class="intel-article-summary">
+                  <span class="article-signal" aria-hidden="true"></span>
+                  <span class="article-title-text">{{ article.title }}</span>
+                  <span class="article-quick-meta">
+                    <span>{{ article.source_name }}</span>
+                    {% if article.importance is not none %}<b>重要度 {{ article.importance }}</b>{% endif %}
+                    {% if article.risk_level and article.risk_level != 'none' %}<b class="risk {{ article.risk_level }}">{{ article.risk_level }}</b>{% endif %}
+                  </span>
+                  <span class="disclosure" aria-hidden="true"></span>
+                </summary>
+                <article class="article-card">
+                  <div class="card-meta">
+                    <span class="category">{{ article.category }}</span>
+                    <span>{{ article.source_name }}</span>
+                    {% if article.risk_level and article.risk_level != 'none' %}<span class="risk {{ article.risk_level }}">{{ article.risk_level }}</span>{% endif %}
+                  </div>
+                  <h3><a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">{{ article.title }}</a></h3>
+                  {% if article.summary %}
+                  <p class="summary">{{ article.summary }}</p>
+                  {% else %}
+                  <p class="excerpt">{{ article.content[:260] }}{% if article.content|length > 260 %}…{% endif %}</p>
+                  {% endif %}
+                  {% if article.tags %}<div class="tags">{% for tag in article.tags %}<span>#{{ tag }}</span>{% endfor %}</div>{% endif %}
+                  <footer>
+                    <time data-time="{{ article.published_at or article.fetched_at }}">{{ article.published_at or article.fetched_at }}</time>
+                    {% if article.importance is not none %}<span class="score">重要度 {{ article.importance }}</span>{% endif %}
+                    {% if article.ai_status == 'done' %}<button class="text-button view-analysis" type="button" data-id="{{ article.id }}">AI 分析结果</button>{% endif %}
+                    {% if article.ai_status == 'failed' %}<button class="text-button error-link view-analysis" type="button" data-id="{{ article.id }}">查看失败原因</button>{% endif %}
+                    <button class="text-button analyze" type="button" data-id="{{ article.id }}">{{ '重新分析' if article.ai_status == 'done' else 'AI 分析' }}</button>
+                    <button class="text-button delete-article" type="button" data-id="{{ article.id }}" data-title="{{ article.title }}">删除</button>
+                  </footer>
+                </article>
+              </details>
+              {% endfor %}
+            </div>
+          </details>
+          {% else %}
+          <div class="empty-state">
+            <div class="radar" aria-hidden="true"><i></i></div>
+            <h3>等待第一条信号</h3>
+            <p>添加信息源后点击“刷新全部源”，W1ndVoice 会在这里展示最新内容。</p>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </div>
+  <dialog id="analysis-dialog" aria-labelledby="analysis-title">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">AI INTELLIGENCE REPORT</p>
+        <h2 id="analysis-title">AI 分析结果</h2>
+      </div>
+      <button class="dialog-close" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="analysis-meta">
+      <span id="analysis-importance"></span>
+      <span id="analysis-risk"></span>
+      <time id="analysis-time"></time>
+    </div>
+    <div class="analysis-body">
+      <h3 id="analysis-article-title"></h3>
+      <p id="analysis-summary"></p>
+      <div class="tags" id="analysis-tags"></div>
+      <a id="analysis-source" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>
+    </div>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
