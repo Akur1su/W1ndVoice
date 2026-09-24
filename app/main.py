@@ -12,7 +12,7 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ from app.crawler import Crawler
 from app.database import Database
 from app.errors import format_validation_errors
 from app.security import SecretStore, validate_public_url
-from app.service import NewsService
+from app.service import NewsService, fetch_error_message
 
 BASE_DIR = Path(__file__).resolve().parent
 config = AppConfig.from_env()
@@ -57,7 +57,7 @@ async def lifespan(_: FastAPI):
         scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="W1ndVoice", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="W1ndVoice", version="0.1.1", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
@@ -85,6 +85,10 @@ class ServerSettings(BaseModel):
     port: Annotated[int, Field(ge=1024, le=65535)]
 
 
+class StreamSettings(BaseModel):
+    per_source_limit: Annotated[int, Field(ge=1, le=500)]
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(_: Request, exc: RequestValidationError):
     return JSONResponse(
@@ -103,14 +107,19 @@ async def sources_page(request: Request):
     return render_dashboard(request, "sources")
 
 
-@app.get("/settings/ai", response_class=HTMLResponse)
-async def ai_settings_page(request: Request):
-    return render_dashboard(request, "ai")
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    return render_dashboard(request, "settings")
 
 
-@app.get("/settings/server", response_class=HTMLResponse)
-async def server_settings_page(request: Request):
-    return render_dashboard(request, "server")
+@app.get("/settings/ai", include_in_schema=False)
+async def old_ai_settings_page():
+    return RedirectResponse("/settings#ai-settings", status_code=308)
+
+
+@app.get("/settings/server", include_in_schema=False)
+async def old_server_settings_page():
+    return RedirectResponse("/settings#server-settings", status_code=308)
 
 
 @app.get("/stream", response_class=HTMLResponse)
@@ -119,25 +128,37 @@ async def stream_page(request: Request):
 
 
 def render_dashboard(
-    request: Request, active_view: Literal["home", "sources", "ai", "server", "stream"]
+    request: Request, active_view: Literal["home", "sources", "settings", "stream"]
 ):
-    articles = db.list_articles(limit=100)
-    grouped: dict[str, dict] = {}
+    stream_settings = public_stream_settings()
+    articles = (
+        db.list_stream_articles(per_source_limit=stream_settings["per_source_limit"])
+        if active_view == "stream" else []
+    )
+    sources = db.list_sources()
+    categories: dict[str, dict] = {}
+    sources_by_id: dict[int, dict] = {}
+    for source in sources:
+        category = source["category"].strip() or "未分类"
+        group = categories.setdefault(category, {"name": category, "sources": [], "article_count": 0})
+        source_group = {"source": source, "articles": []}
+        group["sources"].append(source_group)
+        sources_by_id[source["id"]] = source_group
     for article in articles:
-        category = article["category"] or "未分类"
-        if category not in grouped:
-            grouped[category] = {"name": category, "articles": []}
-        grouped[category]["articles"].append(article)
+        source_group = sources_by_id[article["source_id"]]
+        source_group["articles"].append(article)
+        categories[source_group["source"]["category"].strip() or "未分类"]["article_count"] += 1
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "sources": db.list_sources(),
+            "sources": sources,
             "articles": articles,
-            "article_groups": list(grouped.values()),
+            "category_groups": list(categories.values()),
             "stats": db.stats(),
             "ai_settings": analyzer.public_settings(),
             "server_settings": public_server_settings(),
+            "stream_settings": stream_settings,
             "asset_version": asset_version,
             "active_view": active_view,
         },
@@ -161,7 +182,10 @@ async def create_source(payload: SourceCreate):
         source["url"] = validate_public_url(source["url"])
         return db.add_source(source)
     except (ValueError, sqlite3.IntegrityError) as exc:
-        message = "该网址已存在" if isinstance(exc, sqlite3.IntegrityError) else str(exc)
+        message = (
+            "该网址已存在，请在信息源列表中编辑或点击“立即抓取”"
+            if isinstance(exc, sqlite3.IntegrityError) else str(exc)
+        )
         raise HTTPException(status_code=400, detail=message) from exc
 
 
@@ -185,6 +209,14 @@ async def delete_source(source_id: int):
     return {"status": "deleted"}
 
 
+@app.delete("/api/categories")
+async def delete_category(name: str):
+    deleted = db.delete_category(name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    return {"status": "deleted", "sources_deleted": deleted}
+
+
 @app.post("/api/sources/{source_id}/fetch")
 async def fetch_source(source_id: int):
     try:
@@ -193,7 +225,7 @@ async def fetch_source(source_id: int):
         raise HTTPException(status_code=404, detail="信息源不存在") from exc
     except Exception as exc:
         logger.exception("Fetch failed for source %s", source_id)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=fetch_error_message(exc)) from exc
 
 
 @app.post("/api/fetch-all")
@@ -295,6 +327,26 @@ async def get_server_settings():
 async def save_server_settings(payload: ServerSettings):
     db.set_settings({"server_port": str(payload.port)})
     return public_server_settings()
+
+
+def public_stream_settings() -> dict[str, int]:
+    stored = db.get_settings().get("stream_articles_per_source")
+    try:
+        limit = int(stored) if stored is not None else 100
+    except ValueError:
+        limit = 100
+    return {"per_source_limit": limit if 1 <= limit <= 500 else 100}
+
+
+@app.get("/api/settings/stream")
+async def get_stream_settings():
+    return public_stream_settings()
+
+
+@app.put("/api/settings/stream")
+async def save_stream_settings(payload: StreamSettings):
+    db.set_settings({"stream_articles_per_source": str(payload.per_source_limit)})
+    return public_stream_settings()
 
 
 def run() -> None:

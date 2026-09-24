@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="W1ndVoice — 你的技术与安全情报雷达">
-  <title>{{ {'home': 'W1ndVoice', 'sources': '添加信息源 · W1ndVoice', 'ai': 'AI 设置 · W1ndVoice', 'server': '端口设置 · W1ndVoice', 'stream': '最新情报流 · W1ndVoice'}[active_view] }}</title>
+  <title>{{ {'home': 'W1ndVoice', 'sources': '添加信息源 · W1ndVoice', 'settings': '设置 · W1ndVoice', 'stream': '最新情报流 · W1ndVoice'}[active_view] }}</title>
   <link rel="icon" href="{{ url_for('static', path='/w1ndvoice.ico') }}" type="image/x-icon">
   <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v={{ asset_version }}">
   <script src="{{ url_for('static', path='/app.js') }}?v={{ asset_version }}" defer></script>
@@ -19,14 +19,8 @@
       <p class="tagline">技术 · 漏洞 · AI 情报雷达</p>
       <nav class="header-actions" aria-label="主导航">
         <span class="health"><span></span> LOCAL</span>
-        <details class="settings-menu" id="settings-menu">
-          <summary>设置 <span aria-hidden="true">⌄</span></summary>
-          <div class="settings-dropdown">
-            <a href="/sources" {% if active_view == 'sources' %}aria-current="page"{% endif %}>添加信息源</a>
-            <a href="/settings/ai" {% if active_view == 'ai' %}aria-current="page"{% endif %}>AI 设置</a>
-            <a href="/settings/server" {% if active_view == 'server' %}aria-current="page"{% endif %}>端口设置</a>
-          </div>
-        </details>
+        <a class="nav-action" href="/sources" {% if active_view == 'sources' %}aria-current="page"{% endif %}>添加信息源</a>
+        <a class="nav-action" href="/settings" {% if active_view == 'settings' %}aria-current="page"{% endif %}>设置</a>
       </nav>
     </header>
 
@@ -57,7 +51,7 @@
           <summary><span>添加信息源</span><small>添加 RSS、JSON API 或网页</small></summary>
           <form id="source-form" class="form-grid">
             <label>名称<input name="name" required maxlength="100" placeholder="例如：CISA 安全公告"></label>
-            <label>分类<input name="category" required maxlength="50" value="漏洞"></label>
+            <label>分类（可选择已有分类或输入新分类）<input name="category" list="existing-categories" required maxlength="50" value="漏洞"><datalist id="existing-categories">{% for group in category_groups %}<option value="{{ group.name }}">{% endfor %}</datalist></label>
             <label class="wide">网址<input name="url" required type="url" placeholder="https://example.com/feed.xml"></label>
             <label>类型
               <select name="kind">
@@ -80,7 +74,10 @@
             </div>
           </form>
           <div class="source-list">
-            {% for source in sources %}
+            {% for group in category_groups %}
+            <details class="source-category">
+              <summary class="source-category-summary"><strong>{{ group.name }}</strong><small>{{ group.sources|length }} 个信息源</small><button class="icon-button danger delete-category" type="button" data-category="{{ group.name }}" data-count="{{ group.sources|length }}" aria-label="删除分类：{{ group.name }}" title="删除分类及其中所有信息源和文章">×</button><span class="disclosure" aria-hidden="true"></span></summary>
+              {% for item in group.sources %}{% set source = item.source %}
             <article class="source-row">
               <div class="source-dot {{ 'ok' if not source.last_error else 'error' }}"></div>
               <div>
@@ -103,8 +100,10 @@
                 data-auto="{{ source.auto_analyze }}"
                 data-prompt="{{ source.ai_prompt }}"
                 title="修改该信息源">编辑</button>
-              <button class="icon-button danger delete-source" data-id="{{ source.id }}" title="删除">×</button>
+              <button class="icon-button danger delete-source" type="button" data-id="{{ source.id }}" data-name="{{ source.name }}" aria-label="删除信息源：{{ source.name }}" title="删除信息源及其文章">×</button>
             </article>
+              {% endfor %}
+            </details>
             {% else %}
             <p class="empty-small">尚未添加信息源。</p>
             {% endfor %}
@@ -112,13 +111,13 @@
         </details>
       </section>
 
-      <section class="page-view workspace-view ai-view" data-view="ai" {% if active_view != 'ai' %}hidden{% endif %}>
+      <section class="page-view workspace-view settings-view" data-view="settings" {% if active_view != 'settings' %}hidden{% endif %}>
         <div class="page-heading">
           <a class="back-home" href="/">← 返回首页</a>
           <p class="eyebrow">SETTINGS</p>
-          <h2>AI 设置</h2>
+          <h2>设置</h2>
         </div>
-        <details class="panel ai-panel" open>
+        <details class="panel ai-panel" id="ai-settings" open>
           <summary><span>AI 设置</span><small>{{ '已配置密钥' if ai_settings.has_api_key else '尚未配置' }}</small></summary>
           <form id="ai-form" class="form-grid">
             <label class="wide">OpenAI-compatible Base URL<input name="base_url" type="url" required minlength="8" maxlength="2000" value="{{ ai_settings.base_url }}"></label>
@@ -128,19 +127,20 @@
             <button class="button secondary wide" type="submit">保存 AI 设置</button>
           </form>
         </details>
-      </section>
-
-      <section class="page-view workspace-view server-view" data-view="server" {% if active_view != 'server' %}hidden{% endif %}>
-        <div class="page-heading">
-          <a class="back-home" href="/">← 返回首页</a>
-          <p class="eyebrow">SETTINGS</p>
-          <h2>端口设置</h2>
-        </div>
-        <div class="panel server-panel">
+        <div class="panel server-panel" id="server-settings">
+          <h3 class="settings-card-title">端口设置</h3>
           <form id="server-form" class="form-grid">
             <label class="wide">本地监听端口<input name="port" type="number" min="1024" max="65535" step="1" required value="{{ server_settings.configured_port }}"></label>
             <p class="privacy wide" id="server-port-state">当前使用 {{ server_settings.current_port }} 端口。{% if server_settings.environment_override %}环境变量 W1NDVOICE_PORT 正在覆盖此设置。{% elif server_settings.restart_required %}已保存新端口，关闭并重新打开应用后生效。{% else %}修改后需关闭并重新打开应用。{% endif %}</p>
             <button class="button secondary wide" type="submit">保存端口</button>
+          </form>
+        </div>
+        <div class="panel stream-settings-panel" id="stream-settings">
+          <h3 class="settings-card-title">情报流显示</h3>
+          <form id="stream-settings-form" class="form-grid">
+            <label class="wide">每个信息源展示最近多少篇文章<input name="per_source_limit" type="number" min="1" max="500" step="1" required value="{{ stream_settings.per_source_limit }}"></label>
+            <p class="privacy wide">仅影响最新情报流的显示数量，已收录文章不会被删除。默认 100 篇，最多 500 篇。</p>
+            <button class="button secondary wide" type="submit">保存显示数量</button>
           </form>
         </div>
       </section>
@@ -159,26 +159,32 @@
         </div>
 
         <div class="intel-groups" id="article-grid">
-          {% for group in article_groups %}
-          <details class="intel-group" data-category="{{ group.name }}">
+          {% for group in category_groups %}
+          <details class="intel-group" data-category="{{ group.name }}" data-search="{{ group.name }}">
             <summary class="intel-group-summary">
               <span class="group-index">{{ '%02d'|format(loop.index) }}</span>
               <span class="group-name">{{ group.name }}</span>
-              <span class="group-latest">最新 <time data-time="{{ group.articles[0].published_at or group.articles[0].fetched_at }}">{{ group.articles[0].published_at or group.articles[0].fetched_at }}</time></span>
-              <span class="group-count">{{ group.articles|length }} 条</span>
+              <span class="group-latest">{{ group.sources|length }} 个信息源</span>
+              <span class="group-count">{{ group.article_count }} 条</span>
+              <button class="icon-button danger delete-category stream-delete-category" type="button" data-category="{{ group.name }}" data-count="{{ group.sources|length }}" aria-label="删除分类：{{ group.name }}" title="删除分类及其中所有信息源和文章">×</button>
               <span class="disclosure" aria-hidden="true"></span>
             </summary>
-            <div class="intel-list">
-              {% for article in group.articles %}
+            <div class="intel-sources">
+              {% for item in group.sources %}
+              <details class="intel-source" data-source-id="{{ item.source.id }}" data-search="{{ item.source.name }} {{ item.source.category }}">
+                <summary class="intel-source-summary"><span class="source-name">{{ item.source.name }}</span><span class="group-count">{{ item.articles|length }} 条</span><button class="icon-button danger delete-source stream-delete-source" type="button" data-id="{{ item.source.id }}" data-name="{{ item.source.name }}" aria-label="删除信息源：{{ item.source.name }}" title="删除信息源及其文章">×</button><span class="disclosure" aria-hidden="true"></span></summary>
+                <div class="intel-list">
+              {% for article in item.articles %}
               <details class="intel-article" data-search="{{ article.title }} {{ article.source_name }} {{ article.category }} {{ article.summary }} {{ article.content[:500] }}">
                 <summary class="intel-article-summary">
                   <span class="article-signal" aria-hidden="true"></span>
                   <span class="article-title-text">{{ article.title }}</span>
                   <span class="article-quick-meta">
                     <span>{{ article.source_name }}</span>
-                    {% if article.importance is not none %}<b>重要度 {{ article.importance }}</b>{% endif %}
+                    {% if article.importance is not none %}<b class="article-importance">重要度 {{ article.importance }}</b>{% endif %}
                     {% if article.risk_level and article.risk_level != 'none' %}<b class="risk {{ article.risk_level }}">{{ article.risk_level }}</b>{% endif %}
                   </span>
+                  <button class="icon-button danger delete-article stream-delete-article" type="button" data-id="{{ article.id }}" data-title="{{ article.title }}" aria-label="删除文章：{{ article.title }}" title="删除这篇文章">×</button>
                   <span class="disclosure" aria-hidden="true"></span>
                 </summary>
                 <article class="article-card">
@@ -200,9 +206,12 @@
                     {% if article.ai_status == 'done' %}<button class="text-button view-analysis" type="button" data-id="{{ article.id }}">AI 分析结果</button>{% endif %}
                     {% if article.ai_status == 'failed' %}<button class="text-button error-link view-analysis" type="button" data-id="{{ article.id }}">查看失败原因</button>{% endif %}
                     <button class="text-button analyze" type="button" data-id="{{ article.id }}">{{ '重新分析' if article.ai_status == 'done' else 'AI 分析' }}</button>
-                    <button class="text-button delete-article" type="button" data-id="{{ article.id }}" data-title="{{ article.title }}">删除</button>
                   </footer>
                 </article>
+              </details>
+              {% endfor %}
+              {% if not item.articles %}<p class="empty-small">该信息源尚无文章。</p>{% endif %}
+                </div>
               </details>
               {% endfor %}
             </div>

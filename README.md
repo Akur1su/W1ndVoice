@@ -4,9 +4,19 @@ W1ndVoice 是一个轻量、自托管的技术与安全情报雷达。它可以�
 
 ![W1ndVoice 情报面板](docs/dashboard.png)
 
+## 0.1.1 更新
+
+- 新增 JSON API / JSON Feed 订阅支持，可读取公开 GET 接口中的常见文章字段。
+- 信息源与最新情报流按“分类 → 信息源 → 文章”展示；支持删除分类、单个信息源和文章，并可选择已有分类。重复的信息源名称会在添加或编辑时提示。
+- 修复新信息源抓取失败后的提示，以及旧信息源文章被全局 100 篇上限挤出情报流的问题。每个信息源的展示篇数现可在设置中调整，默认 100 篇。
+- 将 AI、端口及情报流展示篇数合并到设置页；AI 分析完成后只更新对应文章内容，保留已展开的菜单。
+
+Windows 便携版请从 [v0.1.1 发布页](https://github.com/Akur1su/W1ndVoice/releases/tag/v0.1.1)下载。更新时关闭应用，仅替换 EXE；保留原目录中的 `w1ndvoice.db` 与 `secret.key`。
+
 ## 当前能力
 
 - 在网页界面添加、编辑、删除和立即刷新信息源，并显示可点击的原始 URL
+- 信息源和最新情报流按“分类 → 信息源 → 文章”分层展示；每个信息源默认展示最近 100 篇，可在统一设置页面调整；可选已有分类，并可删除整个分类、单个信息源或文章条目
 - 支持 RSS/Atom、JSON API / JSON Feed、网页 RSS 自动发现、普通网页链接发现
 - 普通网页可填写 CSS 选择器，精确指定文章列表元素
 - 自动提取文章正文、规范化 URL、按 URL 与内容哈希去重
@@ -53,13 +63,13 @@ docker compose up --build -d
 
 ## Windows EXE
 
-在 Windows 上执行 `.\scripts\build-exe.ps1`，生成 `dist/W1ndVoice.exe`。双击 EXE 后会打开独立的 W1ndVoice 应用窗口，不会弹出终端或自动打开浏览器；关闭应用窗口即可停止本地服务。应用窗口依赖 Microsoft Edge WebView2 Runtime。若 8000 端口已被占用，可在“设置 → 端口设置”保存其他端口，关闭并重新打开应用后生效；`W1NDVOICE_PORT` 环境变量优先于界面设置。端口被占用而无法启动时，可临时设置此环境变量再启动。
+在 Windows 上执行 `.\scripts\build-exe.ps1`，生成 `dist/W1ndVoice.exe`。双击 EXE 后会打开独立的 W1ndVoice 应用窗口，不会弹出终端或自动打开浏览器；关闭应用窗口即可停止本地服务。应用窗口依赖 Microsoft Edge WebView2 Runtime。若 8000 端口已被占用，可在“设置”页面保存其他端口，关闭并重新打开应用后生效；`W1NDVOICE_PORT` 环境变量优先于界面设置。端口被占用而无法启动时，可临时设置此环境变量再启动。
 
 EXE 不包含当前用户的订阅、文章、API Key 或加密密钥。便携版首次运行会在 EXE 所在目录创建 `w1ndvoice.db`、`secret.key` 和日志文件，因此应将 EXE 放在可写的私人目录，不要直接从只读目录运行；源码版仍使用项目下的 `data/`。移动个人数据时必须同时移动 `w1ndvoice.db` 与 `secret.key`，不要将它们加入公开发布文件。
 
 ## 上传 GitHub 前
 
-项目的 `.gitignore` 排除了 `data/`、环境变量文件、日志、数据库、密钥、构建目录和 `dist/`。发布源码时只提交代码、示例配置和文档；公开版 EXE 放在 `dist/public/W1ndVoice.exe`，适合作为 GitHub Release 附件单独上传，不要附带个人数据目录。`docs/dashboard.png` 是空白数据实例的截图。
+项目的 `.gitignore` 排除了 `data/`、环境变量文件、日志、数据库、密钥、构建目录和 `dist/`。发布源码时只提交代码、示例配置和文档；公开版 EXE 放在 `dist/public/`，适合作为 GitHub Release 附件单独上传，不要附带个人数据目录。`docs/dashboard.png` 是空白数据实例的截图。
 
 `.gitignore` 只阻止尚未被 Git 跟踪的文件。提交前检查 `git status` 和 `git diff --cached --name-only`，并检查文档截图、日志和历史提交是否含有个人订阅网址或密钥；若密钥已经公开，需在 API 提供商处撤销并更换。
 

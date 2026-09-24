@@ -7,6 +7,12 @@ function notify(message, isError = false) {
   notify.timer = window.setTimeout(() => { toast.className = ""; }, 4200);
 }
 
+const sourceFetchNotice = window.sessionStorage.getItem("w1ndvoice.sourceFetchNotice");
+if (sourceFetchNotice) {
+  window.sessionStorage.removeItem("w1ndvoice.sourceFetchNotice");
+  notify(sourceFetchNotice, true);
+}
+
 async function api(url, options = {}) {
   let response;
   try {
@@ -51,6 +57,7 @@ function buttonBusy(button, busy, text = "处理中…") {
 function leaveSourceEditMode(form) {
   form.reset();
   delete form.dataset.editId;
+  delete form.dataset.originalName;
   updateFetchIntervalVisibility(form);
   updateSourceKindVisibility(form);
   document.querySelector("#save-source").textContent = "仅添加";
@@ -76,6 +83,23 @@ document.querySelector("#source-form")?.addEventListener("submit", async (event)
   const fetchNow = button.dataset.action === "fetch";
   const editId = form.dataset.editId;
   const values = Object.fromEntries(new FormData(form));
+  values.name = values.name.trim();
+  values.category = values.category.trim();
+  const nameChanged = !editId ||
+    values.name.toLocaleLowerCase() !== (form.dataset.originalName || "").trim().toLocaleLowerCase();
+  const duplicateName = nameChanged && [...document.querySelectorAll(".edit-source")].some((sourceButton) =>
+    sourceButton.dataset.id !== editId &&
+    sourceButton.dataset.name.trim().toLocaleLowerCase() === values.name.toLocaleLowerCase()
+  );
+  if (duplicateName) {
+    notify("信息源名称已存在，请使用不同名称", true);
+    form.elements.name.focus();
+    return;
+  }
+  if (!values.name || !values.category) {
+    notify("信息源名称和分类不能为空", true);
+    return;
+  }
   values.fetch_interval_hours = Number(values.fetch_interval_hours);
   values.max_pages = Number(values.max_pages);
   values.auto_fetch_enabled = values.never_auto_fetch !== "on";
@@ -92,8 +116,18 @@ document.querySelector("#source-form")?.addEventListener("submit", async (event)
       body: JSON.stringify(values),
     });
     if (fetchNow) {
-      const result = await api(`/api/sources/${source.id}/fetch`, { method: "POST" });
-      notify(`抓取完成，新增或更新 ${result.changed} 条`);
+      try {
+        const result = await api(`/api/sources/${source.id}/fetch`, { method: "POST" });
+        notify(`抓取完成，新增或更新 ${result.changed} 条`);
+      } catch (error) {
+        const saved = editId ? "信息源修改已保存" : "信息源已添加";
+        window.sessionStorage.setItem(
+          "w1ndvoice.sourceFetchNotice",
+          `${saved}，但抓取失败：${error.message}。请在信息源列表点击“立即抓取”重试。`
+        );
+        location.reload();
+        return;
+      }
     } else {
       notify(editId ? "信息源修改已保存" : "信息源已添加");
     }
@@ -108,6 +142,7 @@ document.querySelectorAll(".edit-source").forEach((button) => {
   button.addEventListener("click", () => {
     const form = document.querySelector("#source-form");
     form.dataset.editId = button.dataset.id;
+    form.dataset.originalName = button.dataset.name;
     form.elements.name.value = button.dataset.name;
     form.elements.url.value = button.dataset.url;
     form.elements.category.value = button.dataset.category;
@@ -185,6 +220,25 @@ document.querySelector("#server-form")?.addEventListener("submit", async (event)
   }
 });
 
+document.querySelector("#stream-settings-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type=submit]");
+  buttonBusy(button, true, "正在保存…");
+  try {
+    const result = await api("/api/settings/stream", {
+      method: "PUT",
+      body: JSON.stringify({ per_source_limit: Number(form.elements.per_source_limit.value) }),
+    });
+    form.elements.per_source_limit.value = result.per_source_limit;
+    notify(`每个信息源显示最近 ${result.per_source_limit} 篇`);
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    buttonBusy(button, false);
+  }
+});
+
 document.querySelector("#fetch-all")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
   buttonBusy(button, true, "正在抓取…");
@@ -214,20 +268,47 @@ document.querySelectorAll(".fetch-one").forEach((button) => {
 });
 
 document.querySelectorAll(".delete-source").forEach((button) => {
-  button.addEventListener("click", async () => {
-    if (!window.confirm("删除该信息源及其已抓取文章？此操作无法撤销。")) return;
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const name = button.dataset.name || "该信息源";
+    if (!window.confirm(`删除“${name}”及其已抓取文章？此操作无法撤销。`)) return;
+    buttonBusy(button, true, "…");
     try {
       await api(`/api/sources/${button.dataset.id}`, { method: "DELETE" });
       location.reload();
-    } catch (error) { notify(error.message, true); }
+    } catch (error) {
+      notify(error.message, true);
+      buttonBusy(button, false);
+    }
+  });
+});
+
+document.querySelectorAll(".delete-category").forEach((button) => {
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const category = button.dataset.category;
+    const count = button.dataset.count;
+    if (!window.confirm(`删除分类“${category}”及其中 ${count} 个信息源和所有文章？此操作无法撤销。`)) return;
+    buttonBusy(button, true, "…");
+    try {
+      await api(`/api/categories?name=${encodeURIComponent(category)}`, { method: "DELETE" });
+      location.reload();
+    } catch (error) {
+      notify(error.message, true);
+      buttonBusy(button, false);
+    }
   });
 });
 
 document.querySelectorAll(".delete-article").forEach((button) => {
-  button.addEventListener("click", async () => {
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     const title = button.dataset.title || "该条目";
     if (!window.confirm(`确定删除“${title}”吗？下次重新抓取该来源时可能再次收录。`)) return;
-    buttonBusy(button, true, "删除中…");
+    buttonBusy(button, true, "…");
     try {
       await api(`/api/articles/${button.dataset.id}`, { method: "DELETE" });
       notify("条目已删除");
@@ -239,24 +320,107 @@ document.querySelectorAll(".delete-article").forEach((button) => {
   });
 });
 
+function setAnalysisBadge(container, selector, tag, className, label) {
+  let badge = container.querySelector(selector);
+  if (!label) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement(tag);
+    container.insertBefore(badge, container.querySelector(".view-analysis, .analyze"));
+  }
+  badge.className = className;
+  badge.textContent = label;
+}
+
+function updateArticleAnalysis(article, result) {
+  if (result.ai_status === "done") {
+    const summary = article.querySelector(".article-card .summary, .article-card .excerpt");
+    summary.className = "summary";
+    summary.textContent = result.summary;
+    article.dataset.search += " " + result.summary;
+
+    const risk = ["critical", "high", "medium", "low"].includes(result.risk_level)
+      ? result.risk_level : "";
+    setAnalysisBadge(
+      article.querySelector(".article-quick-meta"),
+      ".article-importance", "b", "article-importance",
+      result.importance == null ? "" : "重要度 " + result.importance
+    );
+    setAnalysisBadge(
+      article.querySelector(".article-quick-meta"),
+      ".risk", "b", "risk " + risk, risk
+    );
+    setAnalysisBadge(
+      article.querySelector(".card-meta"),
+      ".risk", "span", "risk " + risk, risk
+    );
+    const card = article.querySelector(".article-card");
+    let tags = card.querySelector(".tags");
+    if (result.tags.length) {
+      if (!tags) {
+        tags = document.createElement("div");
+        tags.className = "tags";
+        card.insertBefore(tags, card.querySelector("footer"));
+      }
+      tags.replaceChildren(...result.tags.map((tag) => {
+        const item = document.createElement("span");
+        item.textContent = "#" + tag;
+        return item;
+      }));
+    } else {
+      tags?.remove();
+    }
+    setAnalysisBadge(
+      card.querySelector("footer"),
+      ".score", "span", "score",
+      result.importance == null ? "" : "重要度 " + result.importance
+    );
+  }
+
+  if (result.ai_status === "done" || result.ai_status === "failed") {
+    const footer = article.querySelector(".article-card footer");
+    let viewButton = footer.querySelector(".view-analysis");
+    if (!viewButton) {
+      viewButton = document.createElement("button");
+      viewButton.type = "button";
+      footer.insertBefore(viewButton, footer.querySelector(".analyze"));
+    }
+    viewButton.className = result.ai_status === "failed"
+      ? "text-button error-link view-analysis" : "text-button view-analysis";
+    viewButton.dataset.id = footer.querySelector(".analyze").dataset.id;
+    viewButton.textContent = result.ai_status === "failed" ? "查看失败原因" : "AI 分析结果";
+  }
+  article.querySelector(".analyze").textContent =
+    result.ai_status === "done" ? "重新分析" : "AI 分析";
+}
+
 document.querySelectorAll(".analyze").forEach((button) => {
   button.addEventListener("click", async () => {
+    const article = button.closest(".intel-article");
     buttonBusy(button, true, "分析中…");
     try {
-      await api(`/api/articles/${button.dataset.id}/analyze`, { method: "POST" });
-      notify("AI 分析完成");
-      window.setTimeout(() => location.reload(), 500);
-    } catch (error) {
-      notify(error.message, true);
+      const result = await api(`/api/articles/${button.dataset.id}/analyze`, { method: "POST" });
       buttonBusy(button, false);
+      updateArticleAnalysis(article, { ...result, ai_status: "done" });
+      notify("AI 分析完成");
+    } catch (error) {
+      buttonBusy(button, false);
+      try {
+        const current = await api(`/api/articles/${button.dataset.id}/analysis`);
+        updateArticleAnalysis(article, current);
+      } catch (_) { /* Keep the current card if its state cannot be read. */ }
+      notify(error.message, true);
     }
   });
 });
 
 const analysisDialog = document.querySelector("#analysis-dialog");
 
-document.querySelectorAll(".view-analysis").forEach((button) => {
-  button.addEventListener("click", async () => {
+document.querySelector("#article-grid")?.addEventListener("click", async (event) => {
+  const button = event.target.closest(".view-analysis");
+  if (button) {
     buttonBusy(button, true, "读取中…");
     try {
       const result = await api(`/api/articles/${button.dataset.id}/analysis`);
@@ -288,7 +452,7 @@ document.querySelectorAll(".view-analysis").forEach((button) => {
     } finally {
       buttonBusy(button, false);
     }
-  });
+  }
 });
 
 document.querySelector(".dialog-close")?.addEventListener("click", () => analysisDialog.close());
@@ -299,15 +463,24 @@ analysisDialog?.addEventListener("click", (event) => {
 document.querySelector("#article-search")?.addEventListener("input", (event) => {
   const query = event.target.value.trim().toLocaleLowerCase();
   document.querySelectorAll(".intel-group").forEach((group) => {
-    let visibleCount = 0;
-    group.querySelectorAll(".intel-article").forEach((article) => {
-      const matches = article.dataset.search.toLocaleLowerCase().includes(query);
-      article.classList.toggle("hidden", !matches);
-      if (matches) visibleCount += 1;
-      if (query && matches) article.open = true;
+    const categoryMatches = group.dataset.search.toLocaleLowerCase().includes(query);
+    let visibleSources = 0;
+    group.querySelectorAll(".intel-source").forEach((source) => {
+      const sourceMatches = categoryMatches || source.dataset.search.toLocaleLowerCase().includes(query);
+      let visibleArticles = 0;
+      source.querySelectorAll(".intel-article").forEach((article) => {
+        const matches = sourceMatches || article.dataset.search.toLocaleLowerCase().includes(query);
+        article.classList.toggle("hidden", !matches);
+        if (matches) visibleArticles += 1;
+        if (query && matches) article.open = true;
+      });
+      const visible = !query || sourceMatches || visibleArticles > 0;
+      source.classList.toggle("hidden", !visible);
+      if (visible) visibleSources += 1;
+      if (query && visible) source.open = true;
     });
-    group.classList.toggle("hidden", visibleCount === 0);
-    if (query && visibleCount > 0) group.open = true;
+    group.classList.toggle("hidden", Boolean(query) && visibleSources === 0);
+    if (query && visibleSources > 0) group.open = true;
   });
 });
 

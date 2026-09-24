@@ -92,6 +92,45 @@ def test_article_content_change_resets_analysis(tmp_path: Path) -> None:
     assert refreshed["summary"] == ""
 
 
+def test_delete_category_removes_every_source_and_its_articles(tmp_path: Path) -> None:
+    db = Database(tmp_path / "categories.db")
+    for index, category in enumerate(("漏洞", " 漏洞 ", "AI"), start=1):
+        source = db.add_source(
+            {
+                "name": f"源 {index}", "url": f"https://example.com/feed-{index}",
+                "category": category, "kind": "rss", "fetch_interval_hours": 1,
+            }
+        )
+        db.save_articles(
+            source["id"],
+            [make_article(f"文章 {index}", f"https://example.com/article-{index}", "正文")],
+        )
+    assert db.delete_category("漏洞") == 2
+    assert [source["name"] for source in db.list_sources()] == ["源 3"]
+    assert [article["title"] for article in db.list_articles()] == ["文章 3"]
+
+
+def test_existing_duplicate_names_can_still_be_edited_without_renaming(tmp_path: Path) -> None:
+    db = Database(tmp_path / "legacy-names.db")
+    source = db.add_source(
+        {
+            "name": "旧名称", "url": "https://example.com/first", "category": "技术",
+            "kind": "rss", "fetch_interval_hours": 1,
+        }
+    )
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO sources (name, url, category, created_at) VALUES (?, ?, ?, ?)",
+            ("旧名称", "https://example.com/second", "技术", "2026-01-01T00:00:00+00:00"),
+        )
+    edited = db.update_source(
+        source["id"],
+        {"name": "旧名称", "url": source["url"], "category": "漏洞",
+         "kind": "rss", "fetch_interval_hours": 1},
+    )
+    assert edited["category"] == "漏洞"
+
+
 def test_migrates_minute_interval_to_hours(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     connection = sqlite3.connect(path)

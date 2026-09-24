@@ -116,7 +116,13 @@ class Database:
                     )
 
     def add_source(self, source: dict[str, Any]) -> dict[str, Any]:
+        name = source["name"].strip()
+        category = source["category"].strip()
+        if not name or not category:
+            raise ValueError("信息源名称和分类不能为空")
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._check_source_name(db, name)
             cursor = db.execute(
                 """
                 INSERT INTO sources
@@ -125,9 +131,9 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    source["name"],
+                    name,
                     source["url"],
-                    source["category"],
+                    category,
                     source["kind"],
                     source.get("item_selector", ""),
                     source["fetch_interval_hours"],
@@ -150,7 +156,17 @@ class Database:
         return dict(row)
 
     def update_source(self, source_id: int, source: dict[str, Any]) -> dict[str, Any]:
+        name = source["name"].strip()
+        category = source["category"].strip()
+        if not name or not category:
+            raise ValueError("信息源名称和分类不能为空")
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT name FROM sources WHERE id = ?", (source_id,)).fetchone()
+            if not previous:
+                raise KeyError(source_id)
+            if previous["name"].strip().casefold() != name.casefold():
+                self._check_source_name(db, name, source_id)
             cursor = db.execute(
                 """
                 UPDATE sources SET
@@ -161,9 +177,9 @@ class Database:
                 WHERE id=?
                 """,
                 (
-                    source["name"],
+                    name,
                     source["url"],
-                    source["category"],
+                    category,
                     source["kind"],
                     source.get("item_selector", ""),
                     source["fetch_interval_hours"],
@@ -179,6 +195,13 @@ class Database:
                 raise KeyError(source_id)
         return self.get_source(source_id)
 
+    @staticmethod
+    def _check_source_name(db: sqlite3.Connection, name: str, exclude_id: int = -1) -> None:
+        normalized = name.casefold()
+        for row in db.execute("SELECT id, name FROM sources WHERE id != ?", (exclude_id,)):
+            if row["name"].strip().casefold() == normalized:
+                raise ValueError("信息源名称已存在，请使用不同名称")
+
     def list_sources(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM sources"
         if enabled_only:
@@ -191,6 +214,19 @@ class Database:
         with self.connect() as db:
             cursor = db.execute("DELETE FROM sources WHERE id = ?", (source_id,))
             return cursor.rowcount > 0
+
+    def delete_category(self, category: str) -> int:
+        normalized = category.strip()
+        if not normalized:
+            return 0
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            source_ids = [
+                row["id"] for row in db.execute("SELECT id, category FROM sources")
+                if row["category"].strip() == normalized
+            ]
+            db.executemany("DELETE FROM sources WHERE id = ?", [(source_id,) for source_id in source_ids])
+            return len(source_ids)
 
     def update_source_status(self, source_id: int, status: str, error: str = "") -> None:
         with self.connect() as db:
@@ -275,6 +311,34 @@ class Database:
         with self.connect() as db:
             rows = [dict(row) for row in db.execute(sql, params).fetchall()]
         for row in rows:
+            row["tags"] = json.loads(row.pop("tags_json") or "[]")
+        return rows
+
+    def list_stream_articles(self, per_source_limit: int = 100) -> list[dict[str, Any]]:
+        limit = min(max(per_source_limit, 1), 500)
+        with self.connect() as db:
+            rows = [
+                dict(row)
+                for row in db.execute(
+                    """
+                    SELECT a.*, s.name AS source_name, s.category
+                    FROM (
+                        SELECT articles.*,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY source_id
+                                ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC
+                            ) AS source_rank
+                        FROM articles
+                    ) AS a
+                    JOIN sources AS s ON s.id = a.source_id
+                    WHERE a.source_rank <= ?
+                    ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
+                    """,
+                    (limit,),
+                ).fetchall()
+            ]
+        for row in rows:
+            row.pop("source_rank")
             row["tags"] = json.loads(row.pop("tags_json") or "[]")
         return rows
 

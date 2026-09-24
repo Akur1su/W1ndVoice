@@ -24,6 +24,6 @@ def test_port_setting_is_saved_and_requires_restart(tmp_path: Path, monkeypatch)
     assert saved.json()["restart_required"] is (main.config.port != 18080)
     assert database.get_settings()["server_port"] == "18080"
 
-    page = BeautifulSoup(client.get("/settings/server").text, "html.parser")
+    page = BeautifulSoup(client.get("/settings").text, "html.parser")
     assert page.select_one('#server-form input[name="port"]')["value"] == "18080"
     assert client.put("/api/settings/server", json={"port": 70000}).status_code == 422

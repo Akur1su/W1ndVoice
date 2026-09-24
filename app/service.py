@@ -5,11 +5,21 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
+
 from app.ai import AIAnalyzer
 from app.crawler import Crawler
 from app.database import Database
 
 logger = logging.getLogger(__name__)
+
+
+def fetch_error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.ConnectError):
+        return "连接信息源失败，请检查网络或代理设置后重试"
+    if isinstance(exc, httpx.TimeoutException):
+        return "连接信息源超时，请稍后重试"
+    return str(exc).strip() or type(exc).__name__
 
 
 class NewsService:
@@ -48,7 +58,7 @@ class NewsService:
                     "analyzed": analyzed,
                 }
             except Exception as exc:
-                self.db.update_source_status(source_id, "抓取失败", str(exc))
+                self.db.update_source_status(source_id, "抓取失败", fetch_error_message(exc))
                 raise
 
     async def fetch_all(self) -> list[dict[str, Any]]:
