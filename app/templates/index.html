@@ -54,7 +54,7 @@
           <h2>添加信息源</h2>
         </div>
         <details class="panel source-panel" open>
-          <summary><span>添加信息源</span><small>添加 RSS 或任意网页</small></summary>
+          <summary><span>添加信息源</span><small>添加 RSS、JSON API 或网页</small></summary>
           <form id="source-form" class="form-grid">
             <label>名称<input name="name" required maxlength="100" placeholder="例如：CISA 安全公告"></label>
             <label>分类<input name="category" required maxlength="50" value="漏洞"></label>
@@ -63,12 +63,13 @@
               <select name="kind">
                 <option value="auto">自动识别</option>
                 <option value="rss">RSS / Atom</option>
+                <option value="json">JSON API / JSON Feed</option>
                 <option value="web">普通网页</option>
               </select>
             </label>
             <label id="fetch-interval-field">抓取间隔（小时）<input name="fetch_interval_hours" type="number" min="1" max="168" value="1"></label>
-            <label>主页最大抓取页数<input name="max_pages" type="number" min="1" max="100" value="5"></label>
-            <label class="wide">文章项 CSS 选择器（可选）<input name="item_selector" maxlength="300" placeholder="例如：article.news-card"></label>
+            <label id="max-pages-field">主页最大抓取页数<input name="max_pages" type="number" min="1" max="100" value="5"></label>
+            <label class="wide" id="item-selector-field">文章项 CSS 选择器（可选）<input name="item_selector" maxlength="300" placeholder="例如：article.news-card"></label>
             <label class="check wide"><input name="never_auto_fetch" type="checkbox"> 永不自动抓取（仍可使用“立即抓取”）</label>
             <label class="check wide"><input name="auto_analyze" type="checkbox"> 新文章自动 AI 分析（每轮最多 5 条）</label>
             <label class="wide">此信息源的 AI 分析提示词（可选）<textarea name="ai_prompt" rows="6" maxlength="20000" placeholder="留空使用默认规则；可按漏洞、AI 新闻等分别设置"></textarea></label>
@@ -84,7 +85,7 @@
               <div class="source-dot {{ 'ok' if not source.last_error else 'error' }}"></div>
               <div>
                 <strong>{{ source.name }}</strong>
-                <small>{{ source.category }} · {{ source.kind|upper }} · {{ ('每 ' ~ source.fetch_interval_hours ~ ' 小时') if source.auto_fetch_enabled else '仅手动抓取' }} · 最多 {{ source.max_pages }} 页{% if source.ai_prompt %} · 自定义 AI 规则{% endif %}</small>
+                <small>{{ source.category }} · {{ source.kind|upper }} · {{ ('每 ' ~ source.fetch_interval_hours ~ ' 小时') if source.auto_fetch_enabled else '仅手动抓取' }}{% if source.kind in ('auto', 'web') %} · 最多 {{ source.max_pages }} 页{% endif %}{% if source.ai_prompt %} · 自定义 AI 规则{% endif %}</small>
                 <a class="source-url" href="{{ source.url }}" target="_blank" rel="noopener noreferrer" title="{{ source.url }}">{{ source.url }}</a>
                 <span title="{{ source.last_error }}">{{ source.last_error or source.last_status }}</span>
               </div>

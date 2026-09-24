@@ -65,7 +65,7 @@ class SourceCreate(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=100)]
     url: Annotated[str, Field(min_length=8, max_length=2000)]
     category: Annotated[str, Field(min_length=1, max_length=50)] = "技术"
-    kind: Literal["auto", "rss", "web"] = "auto"
+    kind: Literal["auto", "rss", "web", "json"] = "auto"
     item_selector: Annotated[str, Field(max_length=300)] = ""
     fetch_interval_hours: Annotated[int, Field(ge=1, le=168)] = 1
     max_pages: Annotated[int, Field(ge=1, le=100)] = 5

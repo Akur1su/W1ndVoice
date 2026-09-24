@@ -33,7 +33,7 @@ class Crawler:
     async def download(self, url: str) -> Download:
         current = validate_public_url(url)
         async with httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/rss+xml,*/*"},
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json,application/feed+json,application/rss+xml,text/html,*/*"},
             timeout=httpx.Timeout(20, connect=10),
             follow_redirects=False,
             transport=self.transport,
@@ -64,8 +64,17 @@ class Crawler:
 
     async def collect(self, source: dict) -> list[dict]:
         first = await self.download(source["url"])
-        parsed = feedparser.parse(first.body)
         kind = source.get("kind", "auto")
+        content_type = first.content_type.split(";", 1)[0].strip().lower()
+        looks_json = content_type == "application/json" or content_type.endswith("+json")
+        if not content_type:
+            looks_json = first.body.lstrip().startswith((b"{", b"["))
+        if kind == "json" or (kind == "auto" and looks_json):
+            from app.json_adapter import json_articles
+
+            return json_articles(first.body, first.url)
+
+        parsed = feedparser.parse(first.body)
         if kind == "rss" or (kind == "auto" and parsed.version and parsed.entries):
             return await self._from_feed(parsed, first.url)
 

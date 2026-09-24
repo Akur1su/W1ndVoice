@@ -1,13 +1,13 @@
 # W1ndVoice
 
-W1ndVoice 是一个轻量、自托管的技术与安全情报雷达。它可以定时采集 RSS/Atom、带 RSS 自动发现的站点，以及普通网页；内容会存入本机 SQLite，AI 分析则由用户自行配置的 OpenAI-compatible 接口按需执行。
+W1ndVoice 是一个轻量、自托管的技术与安全情报雷达。它可以定时采集 RSS/Atom、JSON API / JSON Feed、带 RSS 自动发现的站点，以及普通网页；内容会存入本机 SQLite，AI 分析则由用户自行配置的 OpenAI-compatible 接口按需执行。
 
 ![W1ndVoice 情报面板](docs/dashboard.png)
 
 ## 当前能力
 
 - 在网页界面添加、编辑、删除和立即刷新信息源，并显示可点击的原始 URL
-- 支持 RSS/Atom、网页 RSS 自动发现、普通网页链接发现
+- 支持 RSS/Atom、JSON API / JSON Feed、网页 RSS 自动发现、普通网页链接发现
 - 普通网页可填写 CSS 选择器，精确指定文章列表元素
 - 自动提取文章正文、规范化 URL、按 URL 与内容哈希去重
 - 每个信息源独立设置抓取间隔（按小时，最低 1 小时）
@@ -82,6 +82,16 @@ git push -u origin main
 
 直接填写订阅地址，类型选“RSS / Atom”或“自动识别”。RSS 条目正文不完整时，W1ndVoice 会继续访问文章链接并提取正文。
 
+### JSON API / JSON Feed
+
+填写返回 JSON 的公开 GET 地址，类型选“JSON API / JSON Feed”或“自动识别”。例如 GitHub 已审核安全公告：
+
+```text
+https://api.github.com/advisories?type=reviewed&sort=published&direction=desc&per_page=100
+```
+
+支持顶层数组、JSON Feed 的 `items` 数组，以及 `results`、`data`、`advisories`、`articles` 包裹的数组（`data` 还可再包一层）。条目需有标题和文章链接；常见字段如 `title` / `summary`、`html_url` / `url`、`description` / `content_text` / `content_html`、`published_at` / `date_published` 会自动映射。每次最多读取前 100 条。接口须可匿名访问，当前不支持自定义请求头、分页和自定义字段映射。
+
 ### 有 RSS 自动发现的网页
 
 填写网站首页或新闻页并选择“自动识别”。页面包含标准 `<link rel="alternate">` 时会自动找到订阅源。
@@ -116,7 +126,7 @@ API Key 不会在设置读取接口或 HTML 中返回。数据库文件 `w1ndvoi
 用户配置 URL
      │
      ▼
-安全 URL 校验 ──► RSS / Atom 解析
+安全 URL 校验 ──► RSS / Atom 或 JSON 解析
      │                  │
      └──────────► 网页发现 + 正文提取
                         │

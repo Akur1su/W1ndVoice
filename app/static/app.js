@@ -52,6 +52,7 @@ function leaveSourceEditMode(form) {
   form.reset();
   delete form.dataset.editId;
   updateFetchIntervalVisibility(form);
+  updateSourceKindVisibility(form);
   document.querySelector("#save-source").textContent = "仅添加";
   document.querySelector("#save-fetch-source").textContent = "添加并立即抓取";
   document.querySelector("#cancel-edit").classList.add("hidden");
@@ -60,6 +61,12 @@ function leaveSourceEditMode(form) {
 function updateFetchIntervalVisibility(form) {
   const neverAutoFetch = form.elements.never_auto_fetch.checked;
   document.querySelector("#fetch-interval-field").classList.toggle("hidden", neverAutoFetch);
+}
+
+function updateSourceKindVisibility(form) {
+  const usesWebOptions = ["auto", "web"].includes(form.elements.kind.value);
+  document.querySelector("#max-pages-field").classList.toggle("hidden", !usesWebOptions);
+  document.querySelector("#item-selector-field").classList.toggle("hidden", !usesWebOptions);
 }
 
 document.querySelector("#source-form")?.addEventListener("submit", async (event) => {
@@ -105,6 +112,7 @@ document.querySelectorAll(".edit-source").forEach((button) => {
     form.elements.url.value = button.dataset.url;
     form.elements.category.value = button.dataset.category;
     form.elements.kind.value = button.dataset.kind;
+    updateSourceKindVisibility(form);
     form.elements.item_selector.value = button.dataset.selector;
     form.elements.fetch_interval_hours.value = button.dataset.hours;
     form.elements.max_pages.value = button.dataset.pages;
@@ -129,7 +137,13 @@ const sourceForm = document.querySelector("#source-form");
 sourceForm?.elements.never_auto_fetch.addEventListener("change", (event) => {
   updateFetchIntervalVisibility(event.target.form);
 });
-if (sourceForm) updateFetchIntervalVisibility(sourceForm);
+sourceForm?.elements.kind.addEventListener("change", (event) => {
+  updateSourceKindVisibility(event.target.form);
+});
+if (sourceForm) {
+  updateFetchIntervalVisibility(sourceForm);
+  updateSourceKindVisibility(sourceForm);
+}
 
 document.querySelector("#ai-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
